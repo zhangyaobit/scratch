@@ -1,0 +1,44 @@
+ARG base_image="rocm/pytorch:rocm5.1.1_ubuntu20.04_py3.7_pytorch_1.10.0"
+FROM ${base_image}
+ENV DEBIAN_FRONTEND noninteractive
+
+WORKDIR /workspace
+
+# pre-requisites
+RUN apt update && apt install -y git wget software-properties-common lsb-release python3-dev python3-numpy python3-setuptools python3-wheel python3-pip
+RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /etc/apt/trusted.gpg.d/kitware.gpg >/dev/null
+RUN apt-add-repository "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main"
+RUN apt update && apt install -y cmake
+
+# build MIGraphX
+ARG branch="branch_for_ort2"
+RUN apt install -y half
+RUN pip3 install https://github.com/RadeonOpenCompute/rbuild/archive/master.tar.gz
+RUN mkdir /workspace/migraphx
+RUN cd /workspace/migraphx && git clone --depth=1 --branch ${branch} https://github.com/ROCmSoftwarePlatform/AMDMIGraphX src
+RUN cd /workspace/migraphx && rbuild package --cxx /opt/rocm/llvm/bin/clang++ -d /workspace/migraphx/deps -B build -S /workspace/migraphx/src -DPYTHON_EXECUTABLE=/usr/bin/python3
+RUN cd /workspace/migraphx/build && dpkg -i *.deb
+
+# build ONNX runtime wheel package
+ARG build_type="Release"
+#ARG ort_branch="zhanyao/microbench"
+ARG ort_branch="master"
+#ARG rocm_version="5.0.1"
+ARG rocm_version="5.1.1"
+COPY patch.enable_gfx1030 /workspace
+RUN git clone --recursive --depth=1 --branch ${ort_branch} https://github.com/microsoft/onnxruntime
+RUN patch onnxruntime/cmake/onnxruntime_providers.cmake < patch.enable_gfx1030
+RUN apt install hipify-clang
+#RUN cd onnxruntime && ./build.sh --parallel --cmake_extra_defines ONNXRUNTIME_VERSION=`cat ./VERSION_NUMBER` --config $build_type --skip_tests --build_wheel --use_migraphx --use_rocm --rocm_version=${rocm_version} --rocm_home /opt/rocm
+RUN cd onnxruntime && ./build.sh --parallel --cmake_extra_defines ONNXRUNTIME_VERSION=`cat ./VERSION_NUMBER` --config $build_type --skip_tests --build_wheel --use_rocm --rocm_version=${rocm_version} --rocm_home /opt/rocm
+RUN pip3 install /workspace/onnxruntime/build/Linux/$build_type/dist/*.whl
+RUN pip3 install psutil coloredlogs packaging transformers sympy
+#RUN pip3 uninstall -y torch
+#RUN pip3 install torch -f https://download.pytorch.org/whl/rocm4.5.2/torch_stable.html
+RUN pip3 install onnx==1.10.2
+RUN pip3 install -U numpy
+
+RUN apt-get install libsqlite3-dev
+RUN mkdir /workspace/rocmProfileData
+COPY rocmProfileData /workspace/rocmProfileData
+RUN cd /workspace/rocmProfileData && make; make install
