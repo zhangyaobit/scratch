@@ -1,0 +1,34 @@
+# --------------------------------------------------------------
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# Licensed under the MIT License.
+# --------------------------------------------------------------
+# Dockerfile to run ONNXRuntime with TensorRT integration
+
+# nVidia TensorRT Base Image
+ARG TRT_CONTAINER_VERSION=22.04
+FROM nvcr.io/nvidia/tensorrt:${TRT_CONTAINER_VERSION}-py3
+
+ARG ONNXRUNTIME_REPO=https://github.com/Microsoft/onnxruntime
+ARG ONNXRUNTIME_BRANCH=master
+ARG CMAKE_CUDA_ARCHITECTURES=37;50;52;60;61;70;75;80
+
+RUN apt-get update &&\
+    apt-get install -y sudo git bash unattended-upgrades
+RUN unattended-upgrade
+
+WORKDIR /code
+ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:/code/cmake-3.21.0-linux-x86_64/bin:/opt/miniconda/bin:${PATH}
+
+RUN python3.8 -m pip install --upgrade pip
+RUN python3.8 -m pip install flatbuffers
+#RUN python3.8 -m pip install -i https://test.pypi.org/simple/ ort-nightly-gpu
+RUN python3.8 -m pip install psutil sympy packaging coloredlogs
+RUN python3.8 -m pip install onnx==1.10.2
+RUN python3.8 -m pip install torch transformers
+RUN python3.8 -m pip install cmake
+
+ARG ort_branch="master"
+ARG build_type="RelWithDebInfo"
+RUN git clone --recursive --depth=1 --branch ${ort_branch} https://github.com/microsoft/onnxruntime
+RUN cd onnxruntime && ./build.sh --use_cuda --config=$build_type --build_wheel --parallel --skip_tests --cuda_home /usr/local/cuda --cudnn_home /usr/local/cuda
+RUN pip3 install /code/onnxruntime/build/Linux/$build_type/dist/*.whl
