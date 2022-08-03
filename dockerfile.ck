@@ -1,7 +1,7 @@
 # Usage: docker build -t ck -f dockerfile.amd .
 
-#FROM rocm/pytorch:latest
-FROM rocm/pytorch:rocm5.1.3_ubuntu20.04_py3.7_pytorch_1.11.0
+FROM rocm/pytorch:latest
+#FROM rocm/pytorch:rocm5.1.3_ubuntu20.04_py3.7_pytorch_1.11.0
 
 RUN mkdir /workspace
 
