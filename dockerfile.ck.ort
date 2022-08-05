@@ -1,0 +1,50 @@
+FROM rocm/pytorch:rocm5.1.3_ubuntu20.04_py3.7_pytorch_1.11.0
+
+RUN apt update
+RUN apt install hipify-clang
+
+RUN pip install cmake
+RUN pip install ninja
+
+RUN mkdir -p /workspace
+
+# this is for 2-wave instruction interleaving optimization
+# this currently doesn't work with error:  error: use of undeclared identifier '__builtin_amdgcn_sched_barrier'; did you mean '__builtin_amdgcn_s_getreg'?
+RUN cd /workspace && \
+    git clone -b ck-9110 https://github.com/RadeonOpenCompute/llvm-project.git && \
+    cd llvm-project && mkdir build && cd build && \
+    cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm/llvm \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DLLVM_ENABLE_ASSERTIONS=1 \
+          -DLLVM_TARGETS_TO_BUILD="AMDGPU;X86" \
+          -DLLVM_ENABLE_PROJECTS="clang;lld;compiler-rt" \
+          ../llvm && \
+    make -j
+ENV HIP_CLANG_PATH=/workspace/llvm-project/build/bin
+
+ARG branch="master"
+#ARG repo="https://github.com/microsoft/onnxruntime.git"
+ARG repo="https://github.com/zhangyaobit/onnxruntime.git" # this enables 2-wave instruction interleaving optimization
+ARG build_dir="build"
+ARG config="Release"
+ARG rocm_home="/opt/rocm"
+RUN cd /workspace && \
+    git clone --branch ${branch} --recursive ${repo} && \
+    cd onnxruntime && \
+    ./build.sh --update \
+      --build_dir ${build_dir} \
+      --config ${config} \
+      --cmake_generator Ninja \
+      --cmake_extra_defines \
+          CMAKE_C_COMPILER=/opt/rocm/llvm/bin/clang \
+          CMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ \
+          CMAKE_EXPORT_COMPILE_COMMANDS=ON \
+          onnxruntime_BUILD_KERNEL_EXPLORER=ON \
+          onnxruntime_DISABLE_CONTRIB_OPS=ON \
+          onnxruntime_DISABLE_ML_OPS=ON \
+          onnxruntime_DEV_MODE=OFF \
+      --skip_submodule_sync --skip_tests \
+      --use_rocm --rocm_home=${rocm_home} --nccl_home=${rocm_home} \
+      --build_wheel && \
+    cmake --build ${build_dir}/${config} --target kernel_explorer -j
+ENV KERNEL_EXPLORER_BUILD_DIR=/workspace/onnxruntime/build/Release
